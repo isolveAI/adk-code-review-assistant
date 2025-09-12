@@ -1,0 +1,153 @@
+{
+  "function_patterns": {
+    "add": {
+      "test_cases": [
+        {"input": [2, 2], "expected": 4, "description": "Basic addition"},
+        {"input": [0, 0], "expected": 0, "description": "Adding zeros"},
+        {"input": [-1, 1], "expected": 0, "description": "Positive and negative"},
+        {"input": [10, -5], "expected": 5, "description": "Larger numbers"},
+        {"input": [1.5, 2.5], "expected": 4.0, "description": "Decimal addition"}
+      ]
+    },
+    "subtract": {
+      "test_cases": [
+        {"input": [5, 3], "expected": 2, "description": "Basic subtraction"},
+        {"input": [0, 0], "expected": 0, "description": "Subtracting zeros"},
+        {"input": [1, 5], "expected": -4, "description": "Negative result"},
+        {"input": [10.5, 0.5], "expected": 10.0, "description": "Decimal subtraction"}
+      ]
+    },
+    "multiply": {
+      "test_cases": [
+        {"input": [3, 4], "expected": 12, "description": "Basic multiplication"},
+        {"input": [0, 5], "expected": 0, "description": "Multiply by zero"},
+        {"input": [-2, 3], "expected": -6, "description": "Negative multiplication"},
+        {"input": [2.5, 4], "expected": 10.0, "description": "Decimal multiplication"}
+      ]
+    },
+    "divide": {
+      "test_cases": [
+        {"input": [10, 2], "expected": 5, "description": "Basic division"},
+        {"input": [7, 2], "expected": 3.5, "description": "Decimal result"},
+        {"input": [0, 5], "expected": 0, "description": "Zero divided"},
+        {"input": [-10, 2], "expected": -5, "description": "Negative division"}
+      ]
+    },
+    "factorial": {
+      "test_cases": [
+        {"input": [0], "expected": 1, "description": "Factorial of 0"},
+        {"input": [1], "expected": 1, "description": "Factorial of 1"},
+        {"input": [5], "expected": 120, "description": "Factorial of 5"},
+        {"input": [3], "expected": 6, "description": "Factorial of 3"},
+        {"input": [10], "expected": 3628800, "description": "Factorial of 10"}
+      ]
+    },
+    "fibonacci": {
+      "test_cases": [
+        {"input": [0], "expected": 0, "description": "Fibonacci of 0"},
+        {"input": [1], "expected": 1, "description": "Fibonacci of 1"},
+        {"input": [2], "expected": 1, "description": "Fibonacci of 2"},
+        {"input": [5], "expected": 5, "description": "Fibonacci of 5"},
+        {"input": [6], "expected": 8, "description": "Fibonacci of 6"},
+        {"input": [10], "expected": 55, "description": "Fibonacci of 10"}
+      ]
+    },
+    "is_prime": {
+      "test_cases": [
+        {"input": [2], "expected": true, "description": "2 is prime"},
+        {"input": [3], "expected": true, "description": "3 is prime"},
+        {"input": [4], "expected": false, "description": "4 is not prime"},
+        {"input": [17], "expected": true, "description": "17 is prime"},
+        {"input": [1], "expected": false, "description": "1 is not prime"},
+        {"input": [0], "expected": false, "description": "0 is not prime"},
+        {"input": [-5], "expected": false, "description": "Negative numbers are not prime"}
+      ]
+    },
+    "is_palindrome": {
+      "test_cases": [
+        {"input": ["racecar"], "expected": true, "description": "Palindrome word"},
+        {"input": ["hello"], "expected": false, "description": "Non-palindrome"},
+        {"input": [""], "expected": true, "description": "Empty string"},
+        {"input": ["a"], "expected": true, "description": "Single character"},
+        {"input": ["A man a plan a canal Panama"], "expected": false, "description": "Palindrome with spaces"}
+      ]
+    },
+    "reverse": {
+      "test_cases": [
+        {"input": ["hello"], "expected": "olleh", "description": "Reverse string"},
+        {"input": [""], "expected": "", "description": "Empty string"},
+        {"input": ["a"], "expected": "a", "description": "Single character"},
+        {"input": ["12345"], "expected": "54321", "description": "Reverse numbers as string"}
+      ]
+    },
+    "reverse_string": {
+      "test_cases": [
+        {"input": ["hello"], "expected": "olleh", "description": "Reverse string"},
+        {"input": [""], "expected": "", "description": "Empty string"},
+        {"input": ["a"], "expected": "a", "description": "Single character"},
+        {"input": ["Hello World"], "expected": "dlroW olleH", "description": "Reverse with spaces"}
+      ]
+    },
+    "sort": {
+      "test_cases": [
+        {"input": [[3, 1, 2]], "expected": [1, 2, 3], "description": "Sort list"},
+        {"input": [[]], "expected": [], "description": "Empty list"},
+        {"input": [[1]], "expected": [1], "description": "Single element"},
+        {"input": [[5, 2, 8, 1, 9]], "expected": [1, 2, 5, 8, 9], "description": "Larger list"}
+      ]
+    },
+    "find_max": {
+      "test_cases": [
+        {"input": [[1, 5, 3, 9, 2]], "expected": 9, "description": "Find maximum"},
+        {"input": [[]], "expected": null, "description": "Empty list"},
+        {"input": [[-5, -2, -8]], "expected": -2, "description": "All negative numbers"},
+        {"input": [[42]], "expected": 42, "description": "Single element"}
+      ]
+    },
+    "count": {
+      "test_cases": [
+        {"input": [[1, 2, 3, 2, 2], 2], "expected": 3, "description": "Count occurrences"},
+        {"input": [[], 5], "expected": 0, "description": "Empty list"},
+        {"input": [[1, 2, 3], 4], "expected": 0, "description": "Element not present"}
+      ]
+    }
+  },
+  "default_tests": {
+    "no_args": [
+      {"input": [], "expected": "check_execution", "description": "No arguments test"}
+    ],
+    "single_arg": [
+      {"input": [1], "expected": "check_execution", "description": "Single argument with 1"},
+      {"input": [0], "expected": "check_execution", "description": "Single argument with 0"},
+      {"input": ["test"], "expected": "check_execution", "description": "Single argument with string"},
+      {"input": [-1], "expected": "check_execution", "description": "Single argument with -1"}
+    ],
+    "two_args": [
+      {"input": [1, 2], "expected": "check_execution", "description": "Two arguments"},
+      {"input": [0, 0], "expected": "check_execution", "description": "Two zeros"},
+      {"input": ["a", "b"], "expected": "check_execution", "description": "Two strings"}
+    ],
+    "three_args": [
+      {"input": [1, 2, 3], "expected": "check_execution", "description": "Three arguments"},
+      {"input": [0, 0, 0], "expected": "check_execution", "description": "Three zeros"}
+    ]
+  },
+  "class_tests": {
+    "calculator": {
+      "test_cases": [
+        {
+          "setup": "calc = Calculator()",
+          "operations": ["calc.add(5)", "calc.multiply(3)", "calc.get_result()"],
+          "expected": 15,
+          "description": "Basic calculator operations"
+        },
+        {
+          "setup": "calc = Calculator()",
+          "operations": ["calc.reset()", "calc.get_result()"],
+          "expected": 0,
+          "description": "Reset calculator"
+        }
+      ]
+    }
+  }
+}
