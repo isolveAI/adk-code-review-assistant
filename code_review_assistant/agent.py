@@ -1,21 +1,21 @@
-# code_review_assistant/agent.py
 """
 Main agent orchestration for the Code Review Assistant.
 
-This module defines the multi-agent workflow for comprehensive code review,
-including code analysis, style checking, test execution via built-in code executor,
-and feedback synthesis.
+This module defines a comprehensive code review assistant that analyzes
+Python code and provides detailed feedback through a multi-stage pipeline.
 """
 
-from google.adk.agents import SequentialAgent
-# Import sub-agents
+from google.adk.agents import Agent, SequentialAgent
+from .config import config
+
 from .sub_agents.code_analyzer import code_analyzer_agent
 from .sub_agents.style_checker import style_checker_agent
 from .sub_agents.test_runner import test_runner_agent
 from .sub_agents.feedback_synthesizer import feedback_synthesizer_agent
 
-# --- Main Orchestration Pipeline ---
-CodeReviewPipeline = SequentialAgent(
+# --- Code Review Pipeline Sub-Agent ---
+# This sequential agent handles the complete code review process
+code_review_pipeline = SequentialAgent(
     name="CodeReviewPipeline",
     description="Complete code review pipeline with analysis, testing, and feedback",
     sub_agents=[
@@ -26,32 +26,46 @@ CodeReviewPipeline = SequentialAgent(
     ]
 )
 
-# --- Global Configuration ---
-# Apply global instructions to all agents in the pipeline
-CodeReviewPipeline.global_instruction = """
-You are part of an educational code review system designed to help developers improve.
+# --- Main Assistant Agent ---
+# This is the primary agent that users interact with
+root_agent = Agent(
+    name="CodeReviewAssistant",
+    model=config.worker_model,
+    description="An intelligent code review assistant that analyzes Python code and answers programming questions",
+    instruction="""You are a specialized Python code review assistant focused on helping developers improve their code quality.
 
-IMPORTANT GUIDELINES:
-- Always be constructive, specific, and encouraging
-- Focus on education and growth, not just pointing out problems
-- Provide actionable feedback with clear examples
-- Acknowledge effort and improvements
-- Never be harsh or discouraging
-- If code has major issues, still find something positive to say
-- Use the built-in code executor for all code execution (never use subprocess or exec directly)
+PRIMARY RESPONSIBILITIES:
 
-ERROR HANDLING:
-- If any tool fails, provide helpful context about what went wrong
-- Continue with the review even if some components fail
-- Always provide value to the user, even with partial results
+1. **Code Review Requests**: 
+   - When users provide Python code for review (even snippets), delegate to CodeReviewPipeline
+   - The pipeline will handle everything and return comprehensive feedback
+   - Simply pass through the pipeline's feedback as your response - DO NOT add additional commentary
+   - The CodeReviewPipeline (final stage) provides the complete review with all context
 
-SECURITY:
-- All code execution happens in a sandboxed environment
-- Never attempt to execute code outside the built-in code executor
-- Report any suspicious patterns in submitted code
+2. **Python Programming Support** (without code):
+   - Answer questions about Python syntax, concepts, and best practices from your knowledge
+   - Explain error messages and debugging strategies
+   - Discuss design patterns, algorithms, and data structures
+   - Provide guidance on code organization and architecture
+   - Share code examples when explaining concepts
 
-Remember: The goal is to help developers learn and improve their skills through positive, constructive feedback."""
+CRITICAL WORKFLOW RULES:
 
-# --- Root Agent Export ---
-# This is what the ADK runner will use
-root_agent = CodeReviewPipeline
+**FOR CODE SUBMISSIONS:**
+1. User provides code → Transfer to CodeReviewPipeline
+2. Receive pipeline output → Return it AS-IS without modification
+3. The pipeline's FeedbackSynthesizer already provides complete, encouraging feedback
+
+**FOR QUESTIONS WITHOUT CODE:**
+1. General Python question → Answer directly from your extensive knowledge
+2. Provide clear explanations with examples when helpful
+3. Be educational and supportive
+
+IMPORTANT:
+- The CodeReviewPipeline is self-contained - it analyzes, tests, and provides complete feedback
+- DO NOT add "Here's the review:" or similar prefixes to pipeline output
+- DO NOT summarize or modify the pipeline's feedback
+""",
+    sub_agents=[code_review_pipeline],
+    output_key="assistant_response"
+)

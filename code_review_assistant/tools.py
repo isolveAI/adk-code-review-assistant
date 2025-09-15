@@ -1,6 +1,5 @@
-# code_review_assistant/tools.py
 """
-Production-ready tools for the Code Review Assistant.
+Tools for the Code Review Assistant.
 
 These tools provide safe code analysis, style checking, test generation,
 and feedback management capabilities using ADK's built-in code executor.
@@ -14,11 +13,11 @@ import pycodestyle
 import tempfile
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
-from google.adk.tools import ToolContext, FunctionTool
-from code_review_assistant.constants import StateKeys
+from google.adk.tools import ToolContext
+from .constants import StateKeys
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -230,140 +229,127 @@ async def check_code_style(code: str, tool_context: ToolContext) -> Dict[str, An
 
 
 def _perform_style_check(code: str) -> Dict[str, Any]:
-    """
-    Helper to perform style check in thread pool.
-    """
+    """Helper to perform style check in thread pool."""
+    import io
+    import sys
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
         tmp.write(code)
         tmp_path = tmp.name
 
     try:
-        # Configure style guide (slightly more lenient for educational purposes)
+        # Capture stdout to get pycodestyle output
+        old_stdout = sys.stdout
+        sys.stdout = captured_output = io.StringIO()
+
         style_guide = pycodestyle.StyleGuide(
-            quiet=True,
+            quiet=False,  # We want output
             max_line_length=100,
-            ignore=['E501', 'W503']  # Ignore line length and line break before binary operator
+            ignore=['E501', 'W503']
         )
 
-        # Check the file
         result = style_guide.check_files([tmp_path])
 
-        # Parse results
+        # Restore stdout
+        sys.stdout = old_stdout
+
+        # Parse captured output
+        output = captured_output.getvalue()
         issues = []
-        checker = pycodestyle.Checker(tmp_path, file_contents=code)
-        checker.check_all()
 
-        for error in checker.results:
-            if isinstance(error, tuple) and len(error) >= 4:
-                issues.append({
-                    'line': error[0],
-                    'column': error[1],
-                    'code': error[2],
-                    'message': error[3]
-                })
+        for line in output.strip().split('\n'):
+            if line and ':' in line:
+                parts = line.split(':', 4)
+                if len(parts) >= 4:
+                    try:
+                        issues.append({
+                            'line': int(parts[1]),
+                            'column': int(parts[2]),
+                            'code': parts[3].split()[0] if len(parts) > 3 else 'E000',
+                            'message': parts[3].strip() if len(parts) > 3 else 'Unknown error'
+                        })
+                    except (ValueError, IndexError):
+                        pass
 
-        # Calculate style score
-        base_score = 100
-        deduction_per_issue = 3
-        score = max(0, base_score - (len(issues) * deduction_per_issue))
+        # Add naming convention checks
+        try:
+            tree = ast.parse(code)
+            naming_issues = _check_naming_conventions(tree)
+            issues.extend(naming_issues)
+        except SyntaxError:
+            pass  # Syntax errors will be caught elsewhere
+
+        # Calculate weighted score
+        score = _calculate_style_score(issues)
 
         return {
             "status": "success",
             "score": score,
             "issue_count": len(issues),
-            "issues": issues[:10],  # Return first 10 issues
+            "issues": issues[:10],  # First 10 issues
             "summary": f"Style score: {score}/100 with {len(issues)} violations"
         }
 
     finally:
-        # Clean up temporary file
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
-async def generate_and_run_tests(code: str, tool_context: ToolContext) -> Dict[str, Any]:
-    """
-    Generates test code for the agent's built-in code executor to run.
+def _check_naming_conventions(tree: ast.AST) -> List[Dict[str, Any]]:
+    """Check PEP 8 naming conventions."""
+    naming_issues = []
 
-    This function generates executable test code that the test_runner_agent
-    will execute using its BuiltInCodeExecutor. The test code includes
-    the original functions and test cases that output JSON results.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            # Skip private/protected methods and __main__
+            if not node.name.startswith('_') and node.name != node.name.lower():
+                naming_issues.append({
+                    'line': node.lineno,
+                    'column': node.col_offset,
+                    'code': 'N802',
+                    'message': f"N802 function name '{node.name}' should be lowercase"
+                })
+        elif isinstance(node, ast.ClassDef):
+            # Check if class name follows CapWords convention
+            if not node.name[0].isupper() or '_' in node.name:
+                naming_issues.append({
+                    'line': node.lineno,
+                    'column': node.col_offset,
+                    'code': 'N801',
+                    'message': f"N801 class name '{node.name}' should use CapWords convention"
+                })
 
-    Args:
-        code: Python source code to test (or retrieves from state)
-        tool_context: ADK tool context
+    return naming_issues
 
-    Returns:
-        Dictionary indicating test code generation status
-    """
-    logger.info("Tool: Generating test code for executor...")
 
-    try:
-        # Retrieve code and analysis from state
-        if not code:
-            code = tool_context.state.get(StateKeys.CODE_TO_REVIEW, '')
-            if not code:
-                return {
-                    "status": "error",
-                    "message": "No code found to test"
-                }
+def _calculate_style_score(issues: List[Dict[str, Any]]) -> int:
+    """Calculate weighted style score based on violation severity."""
+    if not issues:
+        return 100
 
-        analysis = tool_context.state.get(StateKeys.CODE_ANALYSIS, {})
-        functions = analysis.get('functions', [])
+    # Define weights by error type
+    weights = {
+        'E1': 10,  # Indentation errors
+        'E2': 3,  # Whitespace errors
+        'E3': 5,  # Blank line errors
+        'E4': 8,  # Import errors
+        'E5': 5,  # Line length
+        'E7': 7,  # Statement errors
+        'E9': 10,  # Syntax errors
+        'W2': 2,  # Whitespace warnings
+        'W3': 2,  # Blank line warnings
+        'W5': 3,  # Line break warnings
+        'N8': 7,  # Naming conventions
+    }
 
-        if not functions:
-            logger.info("Tool: No functions found to test")
-            # Store empty test results
-            tool_context.state[StateKeys.TEST_RESULTS] = {
-                'passed': 0,
-                'failed': 0,
-                'total': 0
-            }
-            tool_context.state[StateKeys.TEMP_TEST_CODE] = "print('No functions to test')"
+    total_deduction = 0
+    for issue in issues:
+        code_prefix = issue['code'][:2] if len(issue['code']) >= 2 else 'E2'
+        weight = weights.get(code_prefix, 3)
+        total_deduction += weight
 
-            return {
-                "status": "success",
-                "message": "No functions found to test",
-                "functions_to_test": 0,
-                "test_code_generated": True
-            }
-
-        # Generate executable test code
-        test_code = _generate_executable_test_code(code, functions)
-
-        # Store test code for the agent to execute
-        tool_context.state[StateKeys.TEMP_TEST_CODE] = test_code
-        tool_context.state[StateKeys.TEMP_TEST_GENERATION_COMPLETE] = True
-        tool_context.state[StateKeys.TEMP_FUNCTIONS_TO_TEST] = len([f for f in functions
-                                                            if not f['name'].startswith('_')
-                                                            and f['name'] != 'main'])
-
-        logger.info(f"Tool: Generated test code for {len(functions)} functions")
-
-        return {
-            "status": "success",
-            "message": "Test code generated successfully. Agent will execute using code executor.",
-            "functions_to_test": len(functions),
-            "test_code_generated": True,
-            "test_code_length": len(test_code)
-        }
-
-    except Exception as e:
-        error_msg = f"Test generation failed: {str(e)}"
-        logger.error(f"Tool: {error_msg}", exc_info=True)
-
-        tool_context.state[StateKeys.TEST_RESULTS] = {
-            'passed': 0,
-            'failed': 0,
-            'total': 0,
-            'error': error_msg
-        }
-
-        return {
-            "status": "error",
-            "message": error_msg,
-            "test_code_generated": False
-        }
+    # Cap at 100 points deduction
+    return max(0, 100 - min(total_deduction, 100))
 
 
 def _generate_executable_test_code(code: str, functions: List[Dict]) -> str:
@@ -572,11 +558,7 @@ async def search_past_feedback(developer_id: str, tool_context: ToolContext) -> 
                 }
 
                 for query in queries:
-                    # Use asyncio for potential future async memory service
-                    loop = asyncio.get_event_loop()
-                    search_result = await loop.run_in_executor(
-                        None, tool_context.search_memory, query
-                    )
+                    search_result = await tool_context.search_memory(query)
 
                     if search_result and hasattr(search_result, 'memories'):
                         for memory in search_result.memories[:5]:
@@ -715,18 +697,26 @@ async def update_grading_progress(tool_context: ToolContext) -> Dict[str, Any]:
 async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> Dict[str, Any]:
     """
     Saves a detailed grading report as an artifact.
+
+    Args:
+        feedback_text: The feedback text to include in the report
+        tool_context: ADK tool context for state management
+
+    Returns:
+        Dictionary containing save status and details
     """
     logger.info("Tool: Saving grading report...")
 
     try:
-        # Gather all relevant data
+        # Gather all relevant data from state
         code = tool_context.state.get(StateKeys.CODE_TO_REVIEW, '')
         analysis = tool_context.state.get(StateKeys.CODE_ANALYSIS, {})
         style_score = tool_context.state.get(StateKeys.STYLE_SCORE, 0)
+        style_issues = tool_context.state.get(StateKeys.STYLE_ISSUES, [])
         test_results = tool_context.state.get(StateKeys.TEST_RESULTS, {})
         timestamp = datetime.now().isoformat()
 
-        # Create comprehensive report
+        # Create comprehensive report dictionary
         report = {
             'timestamp': timestamp,
             'grading_attempt': tool_context.state.get(StateKeys.GRADING_ATTEMPTS, 1),
@@ -738,7 +728,7 @@ async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> 
             'analysis': analysis,
             'style': {
                 'score': style_score,
-                'issues': tool_context.state.get(StateKeys.STYLE_ISSUES, [])[:5]
+                'issues': style_issues[:5]  # First 5 issues
             },
             'tests': test_results,
             'feedback': feedback_text,
@@ -748,59 +738,72 @@ async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> 
             }
         }
 
-        # Convert to JSON string
+        # Convert report to JSON string
         report_json = json.dumps(report, indent=2)
 
-        # Check if save_artifact is available
+        # Try to save as artifact if the service is available
         if hasattr(tool_context, 'save_artifact'):
-            from google.genai import types
+            try:
+                # Generate filename with timestamp (replace colons for filesystem compatibility)
+                filename = f"grading_report_{timestamp.replace(':', '-')}.json"
 
-            # Create artifact
-            artifact = types.Part.from_text(report_json)
+                # Save the main report (await directly since it's async)
+                version = await tool_context.save_artifact(filename, report_json)
 
-            # Generate filename with timestamp
-            filename = f"grading_report_{timestamp.replace(':', '-')}.json"
+                # Also save a "latest" version for easy access
+                await tool_context.save_artifact("latest_grading_report.json", report_json)
 
-            # Save artifact (async)
-            loop = asyncio.get_event_loop()
-            version = await loop.run_in_executor(
-                None, tool_context.save_artifact, filename, artifact
-            )
+                logger.info(f"Tool: Report saved as {filename} (version {version})")
 
-            # Also save a "latest" version for easy access
-            await loop.run_in_executor(
-                None, tool_context.save_artifact, "latest_grading_report.json", artifact
-            )
+                # Store report in state as well for redundancy
+                tool_context.state[StateKeys.USER_LAST_GRADING_REPORT] = report
 
-            logger.info(f"Tool: Report saved as {filename} (version {version})")
+                return {
+                    "status": "success",
+                    "artifact_saved": True,
+                    "filename": filename,
+                    "version": str(version),  # Convert to string to avoid serialization issues
+                    "size": len(report_json),
+                    "summary": f"Report saved as {filename}"
+                }
 
-            return {
-                "status": "success",
-                "artifact_saved": True,
-                "filename": filename,
-                "version": version,
-                "size": len(report_json)
-            }
-        else:
-            # Fallback: Store in state
-            tool_context.state[StateKeys.USER_LAST_GRADING_REPORT] = report
-            logger.info("Tool: Report saved to state (no artifact service)")
+            except Exception as artifact_error:
+                # Log the artifact save error but continue with state storage
+                logger.warning(f"Artifact service error: {artifact_error}, falling back to state storage")
+                # Continue to fallback below
 
-            return {
-                "status": "success",
-                "artifact_saved": False,
-                "message": "Report saved to state only",
-                "size": len(report_json)
-            }
+        # Fallback: Store in state if artifact service is not available or failed
+        tool_context.state[StateKeys.USER_LAST_GRADING_REPORT] = report
+        logger.info("Tool: Report saved to state (artifact service not available)")
+
+        return {
+            "status": "success",
+            "artifact_saved": False,
+            "message": "Report saved to state only",
+            "size": len(report_json),
+            "summary": "Report saved to session state"
+        }
 
     except Exception as e:
+        # Handle any unexpected errors
         error_msg = f"Report save error: {str(e)}"
         logger.error(f"Tool: {error_msg}", exc_info=True)
+
+        # Still try to save minimal data to state
+        try:
+            tool_context.state[StateKeys.USER_LAST_GRADING_REPORT] = {
+                'error': error_msg,
+                'feedback': feedback_text,
+                'timestamp': datetime.now().isoformat()
+            }
+        except:
+            pass  # Even this failed, just return error
 
         return {
             "status": "error",
             "message": error_msg,
-            "artifact_saved": False
+            "artifact_saved": False,
+            "summary": f"Failed to save report: {error_msg}"
         }
 
 
@@ -821,17 +824,11 @@ def _calculate_avg_function_length(tree: ast.AST) -> float:
     return 0.0
 
 
-# Create FunctionTool instance for test_runner_agent to use
-generate_tests_tool = FunctionTool(func=generate_and_run_tests)
-
-
 # Module exports
 __all__ = [
     'analyze_code_structure',
     'check_code_style',
-    'generate_and_run_tests',
     'search_past_feedback',
     'update_grading_progress',
     'save_grading_report',
-    'generate_tests_tool'
 ]

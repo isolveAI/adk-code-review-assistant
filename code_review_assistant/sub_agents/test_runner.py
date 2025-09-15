@@ -1,9 +1,8 @@
-# code_review_assistant/sub_agents/test_runner.py
-"""
-Test Runner Agent - Safely executes and validates code.
+""""
+Test Runner Agent - Generates and executes tests using built-in code executor.
 
 This agent generates appropriate test cases based on code analysis
-and runs them safely using ADK's built-in code executor.
+and runs them using ADK's built-in code executor.
 """
 
 from google.adk.agents import Agent
@@ -11,39 +10,70 @@ from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.code_executors import BuiltInCodeExecutor
 from google.adk.utils import instructions_utils
 from ..config import config
-from ..constants import StateKeys
-from ..tools import generate_tests_tool
-
 
 async def test_runner_instruction_provider(context: ReadonlyContext) -> str:
-    """Dynamic instruction provider that injects state variables."""
-    template = """You are a testing specialist who creates and runs appropriate tests.
+    template = """You are a testing specialist who creates and runs tests for Python code.
 
-Your workflow:
-1. Review the code structure from {code_analysis} (stored by the analyzer)
-2. Call the generate_and_run_tests tool to create test code
-3. The tool will generate test code and store it in {temp:test_code_to_execute}
-4. After the tool completes, retrieve the test code from state
-5. Execute the test code using the built-in code executor (just run the code directly)
-6. Parse the JSON output from the test execution
-7. Store the parsed results in state as 'test_results'
+Context from previous agents:
+- Structure analysis: {structure_analysis_summary}
+- Style check: {style_check_summary}
 
-The test code will contain all necessary logic to:
-- Define the original functions
-- Run test cases
-- Output results as JSON
+The code to test has been stored in state by the analyzer. You need to:
 
-Important: 
-- The code to test is in {code_to_review}
-- The structure analysis is in {code_analysis}
-- Call generate_and_run_tests with an empty string (tool gets code from state)
-- After getting the test code, execute it directly to get results
-- Handle any execution errors gracefully
+1. Retrieve the code from state (it's in 'code_to_review')
+2. Retrieve the code analysis from state (it's in 'code_analysis') 
+3. Generate executable test code that:
+   - Includes the original functions
+   - Creates test cases based on function names and signatures
+   - Runs the tests
+   - Outputs results as JSON
+4. Execute your generated test code
+5. Parse the results and store them in state as 'test_results'
 
-If tests fail or error, provide helpful feedback about what might be wrong."""
+Write Python code that generates and executes tests. Your test code should output JSON like:
+{
+    "passed": 3,
+    "failed": 1,
+    "total": 4,
+    "pass_rate": 75.0,
+    "details": [...]
+}
+
+Example test generation pattern:
+```python
+import json
+
+# Original code to test
+def add(a, b):
+    return a + b
+
+# Test execution
+test_results = []
+
+# Test 1
+try:
+    result = add(2, 3)
+    test_results.append({"test": "add_basic", "passed": result == 5})
+except Exception as e:
+    test_results.append({"test": "add_basic", "passed": False, "error": str(e)})
+
+# Calculate summary
+passed = sum(1 for r in test_results if r["passed"])
+total = len(test_results)
+
+output = {
+    "passed": passed,
+    "failed": total - passed,
+    "total": total,
+    "pass_rate": (passed / total * 100) if total > 0 else 100
+}
+
+print(json.dumps(output))
+```
+
+Focus on being thorough but practical in your test generation."""
 
     return await instructions_utils.inject_session_state(template, context)
-
 
 # Create the Test Runner agent
 test_runner_agent = Agent(
@@ -51,7 +81,6 @@ test_runner_agent = Agent(
     model=config.worker_model,
     description="Generates and runs tests for Python code using safe code execution",
     instruction=test_runner_instruction_provider,
-    tools=[generate_tests_tool],
-    code_executor=BuiltInCodeExecutor(),  # Safe sandboxed execution
+    code_executor=BuiltInCodeExecutor(),
     output_key="test_execution_summary"
 )

@@ -2,6 +2,11 @@
 # Python
 # ============================================================================
 
+# ADK evaluation history
+.adk/
+*.evalset_result.json
+*.eval_result.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

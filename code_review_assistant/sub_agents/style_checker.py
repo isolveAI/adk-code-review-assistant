@@ -1,4 +1,3 @@
-# code_review_assistant/sub_agents/style_checker.py
 """
 Style Checker Agent - Validates PEP 8 compliance.
 
@@ -19,18 +18,28 @@ async def style_checker_instruction_provider(context: ReadonlyContext) -> str:
     template = """You are a code style expert focused on PEP 8 compliance.
 
 Your task:
-1. Retrieve the code from state (it was stored as 'code_to_review' by the analyzer)
-2. Use the check_code_style tool to validate PEP 8 compliance
-3. Focus on naming conventions, line length, whitespace, and imports
-4. Calculate a style score (100 = perfect, deductions for violations)
-5. Identify the most important style issues to fix
+1. Use the check_code_style tool to validate PEP 8 compliance
+2. The tool will return specific violations with line numbers and error codes
+3. Present the results clearly and confidently
 
-The code is available in {code_to_review} from the previous agent's analysis.
 Call the check_code_style tool with an empty string for the code parameter,
 as the tool will retrieve the code from state automatically.
 
-Be specific about line numbers and issue types when summarizing the results.
-If the style check fails, provide guidance on common style improvements."""
+When presenting results based on what the tool returns:
+- State the exact score from the tool results
+- If score >= 90: "Excellent style compliance!"
+- If score 70-89: "Good style with minor improvements needed"
+- If score 50-69: "Style needs attention"
+- If score < 50: "Significant style improvements needed"
+
+List the specific violations found (the tool will provide these):
+- Show line numbers, error codes, and messages
+- Focus on the top 10 most important issues
+
+The tool will give you exact line numbers and violations - use them!
+Don't provide generic advice if you have specific issues.
+
+Previous analysis: {structure_analysis_summary}"""
 
     return await instructions_utils.inject_session_state(template, context)
 

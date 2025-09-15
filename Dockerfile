@@ -1,4 +1,3 @@
-# deployment/cloud_run/Dockerfile
 FROM python:3.11-slim as builder
 
 WORKDIR /app
@@ -15,7 +14,7 @@ RUN poetry config virtualenvs.create false && \
 
 # Copy application code
 COPY code_review_assistant/ ./code_review_assistant/
-COPY .env.example .
+COPY .env.example .env
 
 FROM python:3.11-slim
 
@@ -32,5 +31,5 @@ USER appuser
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 
-# Run ADK server
-CMD exec python -m adk.api_server --port $PORT
+# CORRECT - Use adk command with proper module path
+CMD ["sh", "-c", "adk api_server code_review_assistant --port $PORT --host 0.0.0.0 --session_service_uri vertexai://$AGENT_ENGINE_ID"]

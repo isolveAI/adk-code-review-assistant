@@ -1,4 +1,3 @@
-# code_review_assistant/sub_agents/code_analyzer.py
 """
 Code Analyzer Agent - Understands code structure and complexity.
 
@@ -11,7 +10,6 @@ from google.adk.tools import FunctionTool
 from ..config import config
 from ..tools import analyze_code_structure
 
-# Create the Code Analyzer agent
 code_analyzer_agent = Agent(
     name="CodeAnalyzer",
     model=config.worker_model,
