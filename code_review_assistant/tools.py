@@ -352,176 +352,6 @@ def _calculate_style_score(issues: List[Dict[str, Any]]) -> int:
     return max(0, 100 - min(total_deduction, 100))
 
 
-def _generate_executable_test_code(code: str, functions: List[Dict]) -> str:
-    """
-    Generate complete executable test code for the built-in code executor.
-
-    Creates a standalone Python script that:
-    1. Defines all the original functions
-    2. Runs test cases for each function
-    3. Outputs results as JSON
-    """
-    test_lines = [
-        "# Automated test execution for code review",
-        "import json",
-        "import sys",
-        "import traceback",
-        "",
-        "# Initialize test results",
-        "test_results = []",
-        "execution_errors = []",
-        "",
-        "# Define the code to test",
-        code,
-        "",
-        "# Test each function",
-    ]
-
-    tested_count = 0
-    for func in functions:
-        func_name = func['name']
-        args = func['args']
-
-        # Skip private functions and main
-        if func_name.startswith('_') or func_name == 'main':
-            continue
-
-        tested_count += 1
-
-        # Generate test cases based on function signature
-        test_cases = _generate_test_cases(func_name, args)
-
-        test_lines.append(f"\n# Testing function: {func_name}")
-        test_lines.append(f"print('Testing {func_name}...', file=sys.stderr)")
-
-        for i, test_case in enumerate(test_cases):
-            test_lines.append(f"""
-# Test case {i + 1} for {func_name}: {test_case.get('description', 'Test')}
-try:
-    test_input = {test_case['input']}
-    result = {func_name}(*test_input)
-    expected = {repr(test_case.get('expected', 'check_execution'))}
-
-    if expected == 'check_execution':
-        # Just verify it executes without error
-        test_results.append({{
-            'function': '{func_name}',
-            'case': {i + 1},
-            'passed': True,
-            'result': str(result)[:100],  # Truncate long results
-            'input': str(test_input),
-            'execution_only': True,
-            'description': '{test_case.get('description', 'Test')}'
-        }})
-    else:
-        # Check if result matches expected
-        passed = result == expected
-        test_results.append({{
-            'function': '{func_name}',
-            'case': {i + 1},
-            'passed': passed,
-            'result': str(result),
-            'expected': str(expected),
-            'input': str(test_input),
-            'description': '{test_case.get('description', 'Test')}'
-        }})
-except Exception as e:
-    test_results.append({{
-        'function': '{func_name}',
-        'case': {i + 1},
-        'passed': False,
-        'error': str(e),
-        'error_type': type(e).__name__,
-        'input': str({test_case['input']}),
-        'description': '{test_case.get('description', 'Test')}'
-    }})
-    execution_errors.append(f"{func_name} test {i + 1}: {{str(e)}}")
-""")
-
-    # Add summary calculation and output
-    test_lines.append("""
-# Calculate summary
-passed = sum(1 for r in test_results if r.get('passed', False))
-failed = sum(1 for r in test_results if not r.get('passed', False))
-total = len(test_results)
-
-# Create output structure
-output = {
-    'passed': passed,
-    'failed': failed,
-    'total': total,
-    'pass_rate': (passed / total * 100) if total > 0 else 100,
-    'details': test_results[:10],  # First 10 results for feedback
-    'execution_errors': execution_errors[:5] if execution_errors else []
-}
-
-# Output as JSON (this will be captured by the code executor)
-print(json.dumps(output, indent=2))
-""")
-
-    return '\n'.join(test_lines)
-
-
-def _generate_test_cases(func_name: str, args: List[str]) -> List[Dict[str, Any]]:
-    """
-    Generate appropriate test cases based on function name and signature.
-    """
-    test_cases = []
-    func_lower = func_name.lower()
-
-    # Mathematical functions
-    if 'add' in func_lower or 'sum' in func_lower:
-        test_cases = [
-            {'input': [2, 3], 'expected': 5, 'description': 'Basic addition'},
-            {'input': [0, 0], 'expected': 0, 'description': 'Adding zeros'},
-            {'input': [-1, 1], 'expected': 0, 'description': 'Positive and negative'}
-        ]
-    elif 'subtract' in func_lower:
-        test_cases = [
-            {'input': [5, 3], 'expected': 2, 'description': 'Basic subtraction'},
-            {'input': [0, 0], 'expected': 0, 'description': 'Subtracting zeros'}
-        ]
-    elif 'multiply' in func_lower:
-        test_cases = [
-            {'input': [3, 4], 'expected': 12, 'description': 'Basic multiplication'},
-            {'input': [0, 5], 'expected': 0, 'description': 'Multiply by zero'}
-        ]
-    elif 'fibonacci' in func_lower:
-        test_cases = [
-            {'input': [0], 'expected': 0, 'description': 'Fibonacci of 0'},
-            {'input': [1], 'expected': 1, 'description': 'Fibonacci of 1'},
-            {'input': [5], 'expected': 5, 'description': 'Fibonacci of 5'}
-        ]
-    elif 'factorial' in func_lower:
-        test_cases = [
-            {'input': [0], 'expected': 1, 'description': 'Factorial of 0'},
-            {'input': [5], 'expected': 120, 'description': 'Factorial of 5'}
-        ]
-    elif 'prime' in func_lower:
-        test_cases = [
-            {'input': [2], 'expected': True, 'description': '2 is prime'},
-            {'input': [4], 'expected': False, 'description': '4 is not prime'}
-        ]
-    else:
-        # Generic test cases based on number of arguments
-        if len(args) == 0:
-            test_cases = [
-                {'input': [], 'expected': 'check_execution', 'description': 'No arguments'}
-            ]
-        elif len(args) == 1:
-            test_cases = [
-                {'input': [1], 'expected': 'check_execution', 'description': 'Single argument'},
-                {'input': [0], 'expected': 'check_execution', 'description': 'Zero input'}
-            ]
-        else:
-            test_cases = [
-                {'input': [1] * len(args), 'expected': 'check_execution',
-                 'description': f'{len(args)} arguments'}
-            ]
-
-    return test_cases[:3]  # Limit to 3 test cases per function
-
-
 async def search_past_feedback(developer_id: str, tool_context: ToolContext) -> Dict[str, Any]:
     """
     Search for past feedback in memory service.
@@ -660,7 +490,15 @@ async def update_grading_progress(tool_context: ToolContext) -> Dict[str, Any]:
         state_updates[StateKeys.SCORE_IMPROVEMENT] = score_improvement
 
         # Track test results if available
-        test_results = tool_context.state.get(StateKeys.TEST_RESULTS, {})
+        test_results = tool_context.state.get(StateKeys.TEST_EXECUTION_SUMMARY, {})
+
+        # Parse if it's a string
+        if isinstance(test_results, str):
+            try:
+                test_results = json.loads(test_results)
+            except:
+                test_results = {}
+
         if test_results and test_results.get('total', 0) > 0:
             pass_rate = (test_results.get('passed', 0) / test_results['total']) * 100
             state_updates[StateKeys.USER_LAST_TEST_PASS_RATE] = pass_rate
@@ -713,7 +551,17 @@ async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> 
         analysis = tool_context.state.get(StateKeys.CODE_ANALYSIS, {})
         style_score = tool_context.state.get(StateKeys.STYLE_SCORE, 0)
         style_issues = tool_context.state.get(StateKeys.STYLE_ISSUES, [])
-        test_results = tool_context.state.get(StateKeys.TEST_RESULTS, {})
+
+        # Get test results
+        test_results = tool_context.state.get(StateKeys.TEST_EXECUTION_SUMMARY, {})
+
+        # Parse if it's a string
+        if isinstance(test_results, str):
+            try:
+                test_results = json.loads(test_results)
+            except:
+                test_results = {}
+
         timestamp = datetime.now().isoformat()
 
         # Create comprehensive report dictionary
@@ -807,7 +655,252 @@ async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> 
         }
 
 
-# --- Helper Functions ---
+async def validate_fixed_style(tool_context: ToolContext) -> Dict[str, Any]:
+    """
+    Validates style compliance of the fixed code.
+
+    Args:
+        tool_context: ADK tool context containing fixed code in state
+
+    Returns:
+        Dictionary with style validation results
+    """
+    logger.info("Tool: Validating style of fixed code...")
+
+    try:
+        # Get the fixed code from state
+        fixed_code = tool_context.state.get(StateKeys.FIXED_CODE, '')
+        if not fixed_code:
+            # Try to extract from the code_fixes output
+            code_fixes = tool_context.state.get(StateKeys.CODE_FIXES, '')
+            if '```python' in code_fixes:
+                # Extract code from markdown
+                start = code_fixes.rfind('```python') + 9
+                end = code_fixes.rfind('```')
+                if start < end:
+                    fixed_code = code_fixes[start:end].strip()
+
+        if not fixed_code:
+            return {
+                "status": "error",
+                "message": "No fixed code found in state"
+            }
+
+        # Store the extracted fixed code
+        tool_context.state[StateKeys.FIXED_CODE] = fixed_code
+
+        # Run style check on fixed code
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            style_result = await loop.run_in_executor(
+                executor, _perform_style_check, fixed_code
+            )
+
+        # Compare with original
+        original_score = tool_context.state.get(StateKeys.STYLE_SCORE, 0)
+        improvement = style_result['score'] - original_score
+
+        # Store results
+        tool_context.state[StateKeys.FIXED_STYLE_SCORE] = style_result['score']
+        tool_context.state[StateKeys.FIXED_STYLE_ISSUES] = style_result['issues']
+
+        logger.info(f"Tool: Fixed code style score: {style_result['score']}/100 "
+                    f"(improvement: +{improvement})")
+
+        return {
+            "status": "success",
+            "fixed_style_score": style_result['score'],
+            "original_style_score": original_score,
+            "improvement": improvement,
+            "remaining_issues": style_result['issues'],
+            "perfect_style": style_result['score'] == 100
+        }
+
+    except Exception as e:
+        logger.error(f"Tool: Style validation failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
+    """
+    Compiles comprehensive report of the fix process.
+
+    Args:
+        tool_context: ADK tool context with all fix pipeline data
+
+    Returns:
+        Comprehensive fix report
+    """
+    logger.info("Tool: Compiling comprehensive fix report...")
+
+    try:
+        # Gather all data
+        original_code = tool_context.state.get(StateKeys.CODE_TO_REVIEW, '')
+        fixed_code = tool_context.state.get(StateKeys.FIXED_CODE, '')
+
+        # Test results
+        original_tests = tool_context.state.get(StateKeys.TEST_EXECUTION_SUMMARY, {})
+        fixed_tests = tool_context.state.get(StateKeys.FIX_TEST_EXECUTION_SUMMARY, {})
+
+        # Parse original test results if they're strings
+        if isinstance(original_tests, str):
+            try:
+                original_tests = json.loads(original_tests)
+            except:
+                original_tests = {}
+
+        # Parse fixed test results if they're strings
+        if isinstance(fixed_tests, str):
+            try:
+                fixed_tests = json.loads(fixed_tests)
+            except:
+                fixed_tests = {"error": "Could not parse test results"}
+
+        # Style scores
+        original_style = tool_context.state.get(StateKeys.STYLE_SCORE, 0)
+        fixed_style = tool_context.state.get(StateKeys.FIXED_STYLE_SCORE, 0)
+
+        # Calculate improvements
+        test_improvement = {
+            'original_pass_rate': original_tests.get('pass_rate', 0),
+            'fixed_pass_rate': fixed_tests.get('pass_rate', 0) if fixed_tests else 0,
+            'improvement': (fixed_tests.get('pass_rate', 0) if fixed_tests else 0) - original_tests.get('pass_rate', 0),
+            'all_tests_pass': fixed_tests.get('failed', 1) == 0 if fixed_tests else False
+        }
+
+        style_improvement = {
+            'original_score': original_style,
+            'fixed_score': fixed_style,
+            'improvement': fixed_style - original_style,
+            'perfect_style': fixed_style == 100
+        }
+
+        # Determine overall status
+        if test_improvement['all_tests_pass'] and style_improvement['perfect_style']:
+            fix_status = 'SUCCESSFUL'
+            status_emoji = '✅'
+        elif test_improvement['improvement'] > 0 or style_improvement['improvement'] > 0:
+            fix_status = 'PARTIAL'
+            status_emoji = '⚠️'
+        else:
+            fix_status = 'FAILED'
+            status_emoji = '❌'
+
+        # Build comprehensive report
+        report = {
+            'status': fix_status,
+            'status_emoji': status_emoji,
+            'timestamp': datetime.now().isoformat(),
+            'original_code': original_code,
+            'fixed_code': fixed_code,
+            'improvements': {
+                'tests': test_improvement,
+                'style': style_improvement
+            },
+            'metrics': {
+                'tests_fixed': test_improvement['improvement'] if test_improvement['improvement'] > 0 else 0,
+                'style_points_gained': style_improvement['improvement'],
+                'total_issues_fixed': 0  # Will be calculated below
+            },
+            'summary': f"{status_emoji} Fix Status: {fix_status}\n"
+                      f"Tests: {original_tests.get('pass_rate', 0):.1f}% → "
+                      f"{test_improvement['fixed_pass_rate']:.1f}%\n"
+                      f"Style: {original_style}/100 → {fixed_style}/100"
+        }
+
+        # Count fixed issues
+        original_style_issues = tool_context.state.get(StateKeys.STYLE_ISSUES, [])
+        fixed_style_issues = tool_context.state.get(StateKeys.FIXED_STYLE_ISSUES, [])
+        issues_fixed = len(original_style_issues) - len(fixed_style_issues)
+        report['metrics']['total_issues_fixed'] = issues_fixed
+
+        # Store report in state
+        tool_context.state[StateKeys.FIX_REPORT] = report
+
+        # Also store fix_status separately for the synthesizer
+        tool_context.state[StateKeys.FIX_STATUS] = fix_status
+
+        logger.info(f"Tool: Fix report compiled - Status: {fix_status}")
+
+        return {
+            "status": "success",
+            "fix_status": fix_status,
+            "report": report
+        }
+
+    except Exception as e:
+        logger.error(f"Tool: Failed to compile fix report: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+async def save_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
+    """
+    Saves the fix report as an artifact.
+
+    Args:
+        tool_context: ADK tool context
+
+    Returns:
+        Save status
+    """
+    logger.info("Tool: Saving fix report...")
+
+    try:
+        # Get the report from state
+        fix_report = tool_context.state.get(StateKeys.FIX_REPORT, {})
+
+        if not fix_report:
+            return {
+                "status": "error",
+                "message": "No fix report found in state"
+            }
+
+        # Convert to JSON
+        report_json = json.dumps(fix_report, indent=2)
+
+        # Generate filename
+        timestamp = datetime.now().isoformat().replace(':', '-')
+        filename = f"fix_report_{timestamp}.json"
+
+        # Try to save as artifact
+        if hasattr(tool_context, 'save_artifact'):
+            try:
+                version = await tool_context.save_artifact(filename, report_json)
+                await tool_context.save_artifact("latest_fix_report.json", report_json)
+
+                logger.info(f"Tool: Fix report saved as {filename}")
+
+                return {
+                    "status": "success",
+                    "filename": filename,
+                    "version": str(version),
+                    "size": len(report_json)
+                }
+            except Exception as e:
+                logger.warning(f"Could not save as artifact: {e}")
+
+        # Fallback: store in state
+        tool_context.state[StateKeys.LAST_FIX_REPORT] = fix_report
+
+        return {
+            "status": "success",
+            "message": "Fix report saved to state",
+            "size": len(report_json)
+        }
+
+    except Exception as e:
+        logger.error(f"Tool: Failed to save fix report: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 
 def _calculate_avg_function_length(tree: ast.AST) -> float:
     """Calculate average function length in lines."""
@@ -831,4 +924,7 @@ __all__ = [
     'search_past_feedback',
     'update_grading_progress',
     'save_grading_report',
+    'validate_fixed_style',
+    'compile_fix_report',
+    'save_fix_report',
 ]

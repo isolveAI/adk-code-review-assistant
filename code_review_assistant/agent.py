@@ -1,71 +1,80 @@
 """
 Main agent orchestration for the Code Review Assistant.
-
 This module defines a comprehensive code review assistant that analyzes
 Python code and provides detailed feedback through a multi-stage pipeline.
 """
 
-from google.adk.agents import Agent, SequentialAgent
+from google.adk.agents import Agent, SequentialAgent, LoopAgent
 from .config import config
-
-from .sub_agents.code_analyzer import code_analyzer_agent
-from .sub_agents.style_checker import style_checker_agent
-from .sub_agents.test_runner import test_runner_agent
-from .sub_agents.feedback_synthesizer import feedback_synthesizer_agent
+from .sub_agents import (
+    code_analyzer_agent,
+    style_checker_agent,
+    test_runner_agent,
+    feedback_synthesizer_agent,
+    code_fixer_agent,
+    fix_test_runner_agent,
+    fix_validator_agent,
+    fix_synthesizer_agent
+)
 
 # --- Code Review Pipeline Sub-Agent ---
-# This sequential agent handles the complete code review process
 code_review_pipeline = SequentialAgent(
     name="CodeReviewPipeline",
     description="Complete code review pipeline with analysis, testing, and feedback",
     sub_agents=[
-        code_analyzer_agent,        # First: Parse and understand the code
-        style_checker_agent,        # Second: Check style compliance
-        test_runner_agent,          # Third: Generate and run tests safely
-        feedback_synthesizer_agent  # Finally: Synthesize and deliver feedback
+        code_analyzer_agent,
+        style_checker_agent,
+        test_runner_agent,
+        feedback_synthesizer_agent
+    ]
+)
+
+# --- Fix Attempt Loop ---
+fix_attempt_loop = LoopAgent(
+    name="FixAttemptLoop",
+    sub_agents=[
+        code_fixer_agent,
+        fix_test_runner_agent,
+        fix_validator_agent
+    ],
+    max_iterations=3  # Try up to 3 times to get a successful fix
+)
+
+# --- Code Fix Pipeline Sub-Agent ---
+# Now composed of the loop plus the final synthesizer
+code_fix_pipeline = SequentialAgent(
+    name="CodeFixPipeline",
+    description="Automated code fixing pipeline with iterative validation",
+    sub_agents=[
+        fix_attempt_loop,      # Try to fix (up to 3 times)
+        fix_synthesizer_agent  # Present final results
     ]
 )
 
 # --- Main Assistant Agent ---
-# This is the primary agent that users interact with
 root_agent = Agent(
     name="CodeReviewAssistant",
     model=config.worker_model,
-    description="An intelligent code review assistant that analyzes Python code and answers programming questions",
+    description="An intelligent code review assistant that analyzes Python code and provides educational feedback",
     instruction="""You are a specialized Python code review assistant focused on helping developers improve their code quality.
 
-PRIMARY RESPONSIBILITIES:
+When a user provides Python code for review:
+1. Immediately delegate to CodeReviewPipeline and pass the code EXACTLY as it was provided by the user.
+2. The pipeline will handle all analysis and feedback
+3. Return ONLY the final feedback from the pipeline - do not add any commentary
 
-1. **Code Review Requests**: 
-   - When users provide Python code for review (even snippets), delegate to CodeReviewPipeline
-   - The pipeline will handle everything and return comprehensive feedback
-   - Simply pass through the pipeline's feedback as your response - DO NOT add additional commentary
-   - The CodeReviewPipeline (final stage) provides the complete review with all context
+After completing a review, if significant issues were identified:
+- If style score < 100 OR tests are failing OR critical issues exist:
+  * Add at the end: "\n\n**💡 I can fix these issues for you. Would you like me to do that?**"
+- If the user responds yes or requests fixes:
+  * Delegate to CodeFixPipeline
+  * Return the fix pipeline's complete output AS-IS
 
-2. **Python Programming Support** (without code):
-   - Answer questions about Python syntax, concepts, and best practices from your knowledge
-   - Explain error messages and debugging strategies
-   - Discuss design patterns, algorithms, and data structures
-   - Provide guidance on code organization and architecture
-   - Share code examples when explaining concepts
+When a user asks what you can do or general questions:
+- Explain your capabilities for code review and fixing
+- Do NOT trigger the pipeline for non-code messages
 
-CRITICAL WORKFLOW RULES:
-
-**FOR CODE SUBMISSIONS:**
-1. User provides code → Transfer to CodeReviewPipeline
-2. Receive pipeline output → Return it AS-IS without modification
-3. The pipeline's FeedbackSynthesizer already provides complete, encouraging feedback
-
-**FOR QUESTIONS WITHOUT CODE:**
-1. General Python question → Answer directly from your extensive knowledge
-2. Provide clear explanations with examples when helpful
-3. Be educational and supportive
-
-IMPORTANT:
-- The CodeReviewPipeline is self-contained - it analyzes, tests, and provides complete feedback
-- DO NOT add "Here's the review:" or similar prefixes to pipeline output
-- DO NOT summarize or modify the pipeline's feedback
-""",
-    sub_agents=[code_review_pipeline],
+The pipelines handle everything for code review and fixing - just pass through their final output.""",
+    sub_agents=[code_review_pipeline, code_fix_pipeline],
     output_key="assistant_response"
 )

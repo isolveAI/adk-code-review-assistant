@@ -9,8 +9,8 @@ from google.adk.agents import Agent
 from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.tools import FunctionTool
 from google.adk.utils import instructions_utils
-from ..config import config
-from ..tools import check_code_style
+from code_review_assistant.config import config
+from code_review_assistant.tools import check_code_style
 
 
 async def style_checker_instruction_provider(context: ReadonlyContext) -> str:
@@ -19,8 +19,15 @@ async def style_checker_instruction_provider(context: ReadonlyContext) -> str:
 
 Your task:
 1. Use the check_code_style tool to validate PEP 8 compliance
-2. The tool will return specific violations with line numbers and error codes
-3. Present the results clearly and confidently
+2. The tool will retrieve the ORIGINAL code from state automatically
+3. Report violations exactly as found
+4. Present the results clearly and confidently
+
+CRITICAL:
+- The tool checks the code EXACTLY as provided by the user
+- Do not suggest the code was modified or fixed
+- Report actual violations found in the original code
+- If there are style issues, they should be reported honestly
 
 Call the check_code_style tool with an empty string for the code parameter,
 as the tool will retrieve the code from state automatically.
@@ -36,15 +43,23 @@ List the specific violations found (the tool will provide these):
 - Show line numbers, error codes, and messages
 - Focus on the top 10 most important issues
 
-The tool will give you exact line numbers and violations - use them!
-Don't provide generic advice if you have specific issues.
+Previous analysis: {structure_analysis_summary}
 
-Previous analysis: {structure_analysis_summary}"""
+Format your response as:
+## Style Analysis Results
+- Style Score: [exact score]/100
+- Total Issues: [count]
+- Assessment: [your assessment based on score]
+
+## Top Style Issues
+[List issues with line numbers and descriptions]
+
+## Recommendations
+[Specific fixes for the most critical issues]"""
 
     return await instructions_utils.inject_session_state(template, context)
 
 
-# Create the Style Checker agent
 style_checker_agent = Agent(
     name="StyleChecker",
     model=config.worker_model,
