@@ -31,5 +31,4 @@ USER appuser
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 
-# CORRECT - Use adk command with proper module path
-CMD ["sh", "-c", "adk api_server code_review_assistant --port $PORT --host 0.0.0.0 --session_service_uri vertexai://$AGENT_ENGINE_ID"]
+CMD ["sh", "-c", "adk api_server code_review_assistant --port ${PORT:-8080} --host 0.0.0.0"]
