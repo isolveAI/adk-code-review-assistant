@@ -1,5 +1,9 @@
 """Agent Engine application wrapper."""
-from code_review_assistant.agent import router
+from vertexai import agent_engines
+from code_review_assistant.agent import root_agent
 
-# Agent Engine expects an 'app' variable
-app = router
+# Wrap the agent in an AdkApp object as per documentation
+app = agent_engines.AdkApp(
+    agent=root_agent,
+    enable_tracing=True,
+)

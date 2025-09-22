@@ -47,6 +47,7 @@ ensure_apis_enabled_for_cloud_run() {
         "compute.googleapis.com"
         "aiplatform.googleapis.com"
         "storage.googleapis.com"
+        "cloudtrace.googleapis.com"
     )
 
     for API in "${REQUIRED_APIS[@]}"; do
@@ -74,6 +75,7 @@ ensure_apis_enabled_for_agent_engine() {
         "storage.googleapis.com"
         "cloudbuild.googleapis.com"
         "compute.googleapis.com"
+        "cloudtrace.googleapis.com"
     )
 
     for API in "${REQUIRED_APIS[@]}"; do
@@ -189,6 +191,14 @@ ensure_iam_permissions_for_cloud_run() {
         --condition=None \
         --quiet 2>/dev/null || echo "   ⚠️  Vertex AI User role may already be assigned."
 
+    # Cloud Trace Agent permission for trace data
+    echo "   - Granting Cloud Trace Agent role..."
+    gcloud projects add-iam-policy-binding "$GOOGLE_CLOUD_PROJECT" \
+        --member="serviceAccount:$SERVICE_ACCOUNT" \
+        --role="roles/cloudtrace.agent" \
+        --condition=None \
+        --quiet 2>/dev/null || echo "   ⚠️  Cloud Trace Agent role may already be assigned."
+
     echo "   - IAM permissions configuration complete."
 }
 
@@ -212,6 +222,14 @@ ensure_iam_permissions_for_agent_engine() {
         --role="roles/aiplatform.user" \
         --condition=None \
         --quiet 2>/dev/null || echo "   ⚠️  Vertex AI User role may already be assigned."
+
+    # Cloud Trace Agent permission for trace data
+    echo "   - Granting Cloud Trace Agent role..."
+    gcloud projects add-iam-policy-binding "$GOOGLE_CLOUD_PROJECT" \
+        --member="serviceAccount:$SERVICE_ACCOUNT" \
+        --role="roles/cloudtrace.agent" \
+        --condition=None \
+        --quiet 2>/dev/null || echo "   ⚠️  Cloud Trace Agent role may already be assigned."
 
     echo "   - IAM permissions configuration complete."
 }
