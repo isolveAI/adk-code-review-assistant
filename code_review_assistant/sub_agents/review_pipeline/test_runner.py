@@ -13,57 +13,64 @@ from code_review_assistant.config import config
 
 
 async def test_runner_instruction_provider(context: ReadonlyContext) -> str:
-    """Dynamic instruction provider that injects state variables."""
+    """Dynamic instruction provider that injects the code_to_review directly."""
     template = """You are a testing specialist who creates and runs tests for Python code.
 
-Context from previous agents:
-- Structure analysis: {structure_analysis_summary}
-- Style check: {style_check_summary}
+THE CODE TO TEST IS:
+```python
+{code_to_review}
+```
 
-The code to test has been stored in state by the analyzer. You need to:
+YOUR TASK:
+1. Understand what the function appears to do based on its name and structure
+2. Generate comprehensive tests (15-20 test cases)
+3. Execute the tests using your code executor
+4. Analyze results to identify bugs vs expected behavior
+5. Output a detailed JSON analysis
 
-1. Retrieve the code from state (it's in 'code_to_review')
-2. Retrieve the code analysis from state (it's in 'code_analysis') 
-3. Generate executable test code that tests the EXACT original code
-4. Execute your generated test code
+TESTING METHODOLOGY:
+- Test with the most natural interpretation first
+- When something fails, determine if it's a bug or unusual design
+- Test edge cases, boundaries, and error scenarios
+- Document any surprising behavior
 
-CRITICAL RULES:
-- NEVER modify the original code, even if you spot issues
-- Test the code EXACTLY as it was provided
-- If the code has bugs, let the tests fail naturally
-- The purpose is to reveal issues, not hide them
+Execute your tests and output ONLY this JSON structure:
+{{
+    "test_summary": {{
+        "total_tests_run": <number>,
+        "tests_passed": <number where code worked correctly>,
+        "tests_failed": <number where code gave wrong results>,
+        "tests_with_errors": <number where code crashed>,
+        "critical_issues_found": <number of fundamental problems>
+    }},
+    "critical_issues": [
+        {{
+            "type": "interface_bug|logic_error|crash",
+            "description": "Clear explanation of the issue",
+            "example_input": "Input that triggers the issue",
+            "expected_behavior": "What should happen",
+            "actual_behavior": "What actually happened",
+            "severity": "high|medium|low"
+        }}
+    ],
+    "test_categories": {{
+        "basic_functionality": {{"passed": X, "failed": Y, "errors": Z}},
+        "edge_cases": {{"passed": X, "failed": Y, "errors": Z}},
+        "error_handling": {{"passed": X, "failed": Y, "errors": Z}}
+    }},
+    "function_behavior": {{
+        "apparent_purpose": "What this function seems designed to do",
+        "actual_interface": "How it actually needs to be called",
+        "unexpected_requirements": ["List any surprising requirements"]
+    }},
+    "verdict": {{
+        "status": "WORKING|BUGGY|BROKEN",
+        "confidence": "high|medium|low",
+        "recommendation": "Ready to use|Needs minor fixes|Needs major fixes"
+    }}
+}}
 
-PARAMETER TESTING STRATEGY:
-1. Check if the function has type hints
-   - If YES: Use those types in your tests
-   - If NO: Look at how the parameter is USED in the code body
-   
-2. Analyze the code to understand expected types:
-   - Look for method calls on parameters (.append, .pop, .split, etc.)
-   - Check operators used (indexing suggests sequence/mapping, arithmetic suggests numbers)
-   - Examine how parameters interact with each other
-   - Consider the function name and context
-   
-3. Test with the simplest, most natural interpretation first
-4. When tests fail with type errors:
-   - Document the exact error clearly
-   - This reveals bugs in the original code
-   - Don't try to "fix" by using unusual parameter types
-
-For each function, generate tests that:
-- Start with straightforward, typical use cases
-- Include edge cases (empty, None, boundaries)
-- Test error conditions (missing keys, invalid types)
-- Try adversarial inputs designed to break the code
-
-Generate at least 10-15 diverse test cases that thoroughly explore the code's behavior.
-
-Your output should be JSON with:
-- Clear documentation of failures and their causes
-- Specific error messages that reveal bugs
-- Notes about any ambiguous parameter expectations
-
-Remember: Your job is to TEST rigorously and reveal bugs, not to work around them."""
+Do NOT output the test code itself, only the JSON analysis."""
 
     return await instructions_utils.inject_session_state(template, context)
 

@@ -28,7 +28,6 @@ class StateKeys:
     SCORE_IMPROVEMENT = "score_improvement"
 
     # === Fix pipeline keys ===
-    FIXED_CODE = "fixed_code"
     CODE_FIXES = "code_fixes"  # From code_fixer_agent output_key
     FIX_TEST_EXECUTION_SUMMARY = "fix_test_execution_summary"  # From fix_test_runner_agent output_key
     FIXED_STYLE_SCORE = "fixed_style_score"

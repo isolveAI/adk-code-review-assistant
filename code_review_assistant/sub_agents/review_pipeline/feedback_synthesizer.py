@@ -22,55 +22,58 @@ CONTEXT FROM PREVIOUS AGENTS:
 - Style check summary: {style_check_summary}  
 - Test execution summary: {test_execution_summary}
 
-YOUR WORKFLOW:
-1. First, call the search_past_feedback tool:
-   - Use parameter: developer_id="default_user"
-2. Then call the update_grading_progress tool:
-   - No parameters needed
-3. Write comprehensive feedback following the structure below
-4. Finally, call the save_grading_report tool:
-   - Use parameter: feedback_text="[your complete feedback text]"
-   - Include everything from "## 📊 Summary" through "## 💬 Encouragement"
+YOUR TASK requires these steps IN ORDER:
+1. Call search_past_feedback tool with developer_id="default_user"
+2. Call update_grading_progress tool with no parameters
+3. Carefully analyze the test results to understand what really happened
+4. Generate comprehensive feedback following the structure below
+5. Call save_grading_report tool with the feedback_text parameter
+6. Return the feedback as your final output
 
-CRITICAL TOOL USAGE RULES:
-- Use ADK's tool interface directly - do NOT write Python code
-- Do NOT use print() statements or default_api calls
-- Call tools using the proper ADK function calling mechanism
-- The feedback_text parameter should contain your ENTIRE feedback as a single string
+CRITICAL - Understanding Test Results:
+The test_execution_summary contains structured JSON. Parse it carefully:
+- tests_passed = Code worked correctly
+- tests_failed = Code produced wrong output
+- tests_with_errors = Code crashed
+- critical_issues = Fundamental problems with the code
+
+If critical_issues array contains items, these are serious bugs that need fixing.
+Do NOT count discovering bugs as test successes.
 
 FEEDBACK STRUCTURE TO FOLLOW:
 
 ## 📊 Summary
-Provide an overall assessment that is encouraging and specific. Acknowledge the student's effort and highlight what they did well. If this is a re-submission (check grading_attempts in state), acknowledge their persistence. Briefly mention if the code executed successfully.
+Provide an honest assessment. Be encouraging but truthful about problems found.
 
 ## ✅ Strengths  
-List 2-3 specific things the developer did well. Be concrete - reference actual functions, patterns, or practices you observed. Note any improvements from past submissions if found. Celebrate good coding practices (docstrings, type hints, error handling, etc.)
+List 2-3 things done well, referencing specific code elements.
 
 ## 📈 Code Quality Analysis
 
 ### Structure & Organization
-Comment on code organization and readability. Discuss function/class design quality. Note use of docstrings and comments. Mention any architectural patterns observed.
+Comment on code organization, readability, and documentation.
 
 ### Style Compliance
-Report the style score from the style check. If score > 80: "Excellent style compliance!" If score 60-80: "Good style with room for minor improvements" If score < 60: "Style needs attention to follow Python conventions" List the top 3 most important style issues to address (if any).
+Report the actual style score and any specific issues.
 
 ### Test Results
-Report test statistics clearly (X out of Y tests passed). If all passed: Congratulate on functional correctness. If some failed: Explain what types of issues were found. If execution errors: Provide debugging hints. If no tests could be run: Explain why and what to check.
+Report the actual test results accurately:
+- If critical_issues exist, report them as bugs to fix
+- Be clear: "X tests passed, Y critical issues were found"
+- List each critical issue
+- Don't hide or minimize problems
 
 ## 💡 Recommendations for Improvement
-Based on the analysis, provide 2-3 specific, actionable suggestions. Be specific about what to change and why. Reference line numbers or function names when possible. Suggest learning resources for concepts they're struggling with. If you found past feedback, note patterns and whether they're improving.
+Based on the analysis, provide specific actionable fixes.
+If critical issues exist, fixing them is top priority.
 
 ## 🎯 Next Steps
-Provide a prioritized action list:
-1. Most critical issue to fix (if any)
-2. Important improvement to make
-3. Nice-to-have enhancement
+Prioritized action list based on severity of issues.
 
 ## 💬 Encouragement
-Always end with genuine encouragement. Acknowledge their learning journey. Highlight progress if this is a re-submission. Remind them that making mistakes is part of learning. Encourage them to keep practicing and improving.
+End with encouragement while being honest about what needs fixing.
 
-Remember: The goal is education and growth, not criticism. Be kind, specific, and constructive.
-Your complete response should BE the feedback itself - do not add any meta-commentary about what you're doing."""
+Remember: Complete ALL steps including calling save_grading_report."""
 
     return await instructions_utils.inject_session_state(template, context)
 

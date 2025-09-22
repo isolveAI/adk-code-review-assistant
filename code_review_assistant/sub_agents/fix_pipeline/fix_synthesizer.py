@@ -17,7 +17,7 @@ async def fix_synthesizer_instruction_provider(context: ReadonlyContext) -> str:
     template = """You are responsible for presenting the fix results to the user.
 
 Based on the validation report: {final_fix_report}
-Fixed code from state: {fixed_code}
+Fixed code from state: {code_fixes}
 Fix status: {fix_status}
 
 Create a comprehensive yet friendly response that includes:

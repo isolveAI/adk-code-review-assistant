@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 
+from google.genai import types
 from google.adk.tools import ToolContext
 from .constants import StateKeys
 
@@ -588,6 +589,7 @@ async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> 
 
         # Convert report to JSON string
         report_json = json.dumps(report, indent=2)
+        report_part = types.Part.from_text(text=report_json)
 
         # Try to save as artifact if the service is available
         if hasattr(tool_context, 'save_artifact'):
@@ -596,10 +598,10 @@ async def save_grading_report(feedback_text: str, tool_context: ToolContext) -> 
                 filename = f"grading_report_{timestamp.replace(':', '-')}.json"
 
                 # Save the main report (await directly since it's async)
-                version = await tool_context.save_artifact(filename, report_json)
+                version = await tool_context.save_artifact(filename, report_part)
 
                 # Also save a "latest" version for easy access
-                await tool_context.save_artifact("latest_grading_report.json", report_json)
+                await tool_context.save_artifact("latest_grading_report.json", report_part)
 
                 logger.info(f"Tool: Report saved as {filename} (version {version})")
 
@@ -669,31 +671,29 @@ async def validate_fixed_style(tool_context: ToolContext) -> Dict[str, Any]:
 
     try:
         # Get the fixed code from state
-        fixed_code = tool_context.state.get(StateKeys.FIXED_CODE, '')
-        if not fixed_code:
-            # Try to extract from the code_fixes output
-            code_fixes = tool_context.state.get(StateKeys.CODE_FIXES, '')
-            if '```python' in code_fixes:
-                # Extract code from markdown
-                start = code_fixes.rfind('```python') + 9
-                end = code_fixes.rfind('```')
-                if start < end:
-                    fixed_code = code_fixes[start:end].strip()
+        code_fixes = tool_context.state.get(StateKeys.CODE_FIXES, '')
+        # Try to extract from the code_fixes output
+        if '```python' in code_fixes:
+            # Extract code from markdown
+            start = code_fixes.rfind('```python') + 9
+            end = code_fixes.rfind('```')
+            if start < end:
+                code_fixes = code_fixes[start:end].strip()
 
-        if not fixed_code:
+        if not code_fixes:
             return {
                 "status": "error",
                 "message": "No fixed code found in state"
             }
 
         # Store the extracted fixed code
-        tool_context.state[StateKeys.FIXED_CODE] = fixed_code
+        tool_context.state[StateKeys.CODE_FIXES] = code_fixes
 
         # Run style check on fixed code
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor() as executor:
             style_result = await loop.run_in_executor(
-                executor, _perform_style_check, fixed_code
+                executor, _perform_style_check, code_fixes
             )
 
         # Compare with original
@@ -739,11 +739,15 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
     try:
         # Gather all data
         original_code = tool_context.state.get(StateKeys.CODE_TO_REVIEW, '')
-        fixed_code = tool_context.state.get(StateKeys.FIXED_CODE, '')
+        code_fixes = tool_context.state.get(StateKeys.CODE_FIXES, '')
 
         # Test results
         original_tests = tool_context.state.get(StateKeys.TEST_EXECUTION_SUMMARY, {})
         fixed_tests = tool_context.state.get(StateKeys.FIX_TEST_EXECUTION_SUMMARY, {})
+
+        # Debug logging to see what we're getting
+        logger.debug(f"Original tests from state: {original_tests}")
+        logger.debug(f"Fixed tests from state: {fixed_tests}")
 
         # Parse original test results if they're strings
         if isinstance(original_tests, str):
@@ -757,7 +761,45 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
             try:
                 fixed_tests = json.loads(fixed_tests)
             except:
-                fixed_tests = {"error": "Could not parse test results"}
+                fixed_tests = {}
+
+        # Calculate pass rates from the actual test results
+        # Handle different possible structures from test runners
+        original_pass_rate = 0
+        if original_tests:
+            if 'pass_rate' in original_tests:
+                original_pass_rate = original_tests['pass_rate']
+            elif 'test_summary' in original_tests:
+                # Handle test_runner_agent's JSON structure
+                summary = original_tests['test_summary']
+                total = summary.get('total_tests_run', 0)
+                passed = summary.get('tests_passed', 0)
+                if total > 0:
+                    original_pass_rate = (passed / total) * 100
+            elif 'passed' in original_tests and 'total' in original_tests:
+                # Handle simple passed/total structure
+                if original_tests['total'] > 0:
+                    original_pass_rate = (original_tests['passed'] / original_tests['total']) * 100
+            elif 'tests_passed' in original_tests and 'total_tests_run' in original_tests:
+                # Another possible structure
+                if original_tests['total_tests_run'] > 0:
+                    original_pass_rate = (original_tests['tests_passed'] / original_tests['total_tests_run']) * 100
+
+        fixed_pass_rate = 0
+        all_tests_pass = False
+        if fixed_tests:
+            if 'pass_rate' in fixed_tests:
+                fixed_pass_rate = fixed_tests['pass_rate']
+                all_tests_pass = fixed_tests.get('failed', 1) == 0
+            elif 'passed' in fixed_tests and 'total' in fixed_tests:
+                # Handle fix_test_runner's output structure
+                if fixed_tests['total'] > 0:
+                    fixed_pass_rate = (fixed_tests['passed'] / fixed_tests['total']) * 100
+                all_tests_pass = fixed_tests.get('failed', 0) == 0
+            elif 'comparison' in fixed_tests:
+                # Handle structure with comparison field
+                fixed_pass_rate = fixed_tests['comparison'].get('new_pass_rate', 0)
+                all_tests_pass = fixed_tests.get('failed', 0) == 0
 
         # Style scores
         original_style = tool_context.state.get(StateKeys.STYLE_SCORE, 0)
@@ -765,10 +807,10 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
 
         # Calculate improvements
         test_improvement = {
-            'original_pass_rate': original_tests.get('pass_rate', 0),
-            'fixed_pass_rate': fixed_tests.get('pass_rate', 0) if fixed_tests else 0,
-            'improvement': (fixed_tests.get('pass_rate', 0) if fixed_tests else 0) - original_tests.get('pass_rate', 0),
-            'all_tests_pass': fixed_tests.get('failed', 1) == 0 if fixed_tests else False
+            'original_pass_rate': original_pass_rate,
+            'fixed_pass_rate': fixed_pass_rate,
+            'improvement': fixed_pass_rate - original_pass_rate,
+            'all_tests_pass': all_tests_pass
         }
 
         style_improvement = {
@@ -779,9 +821,14 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
         }
 
         # Determine overall status
-        if test_improvement['all_tests_pass'] and style_improvement['perfect_style']:
-            fix_status = 'SUCCESSFUL'
-            status_emoji = '✅'
+        # Priority: test improvements matter more than style
+        if test_improvement['improvement'] > 50 or test_improvement['all_tests_pass']:
+            if style_improvement['perfect_style']:
+                fix_status = 'SUCCESSFUL'
+                status_emoji = '✅'
+            else:
+                fix_status = 'PARTIAL'
+                status_emoji = '⚠️'
         elif test_improvement['improvement'] > 0 or style_improvement['improvement'] > 0:
             fix_status = 'PARTIAL'
             status_emoji = '⚠️'
@@ -795,19 +842,19 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
             'status_emoji': status_emoji,
             'timestamp': datetime.now().isoformat(),
             'original_code': original_code,
-            'fixed_code': fixed_code,
+            'code_fixes': code_fixes,
             'improvements': {
                 'tests': test_improvement,
                 'style': style_improvement
             },
             'metrics': {
-                'tests_fixed': test_improvement['improvement'] if test_improvement['improvement'] > 0 else 0,
+                'tests_fixed': max(0, test_improvement['improvement']),
                 'style_points_gained': style_improvement['improvement'],
                 'total_issues_fixed': 0  # Will be calculated below
             },
             'summary': f"{status_emoji} Fix Status: {fix_status}\n"
-                      f"Tests: {original_tests.get('pass_rate', 0):.1f}% → "
-                      f"{test_improvement['fixed_pass_rate']:.1f}%\n"
+                      f"Tests: {original_pass_rate:.1f}% → "
+                      f"{fixed_pass_rate:.1f}%\n"
                       f"Style: {original_style}/100 → {fixed_style}/100"
         }
 
@@ -815,7 +862,7 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
         original_style_issues = tool_context.state.get(StateKeys.STYLE_ISSUES, [])
         fixed_style_issues = tool_context.state.get(StateKeys.FIXED_STYLE_ISSUES, [])
         issues_fixed = len(original_style_issues) - len(fixed_style_issues)
-        report['metrics']['total_issues_fixed'] = issues_fixed
+        report['metrics']['total_issues_fixed'] = max(0, issues_fixed)
 
         # Store report in state
         tool_context.state[StateKeys.FIX_REPORT] = report
@@ -824,6 +871,8 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
         tool_context.state[StateKeys.FIX_STATUS] = fix_status
 
         logger.info(f"Tool: Fix report compiled - Status: {fix_status}")
+        logger.info(f"Tool: Test improvement: {original_pass_rate:.1f}% → {fixed_pass_rate:.1f}%")
+        logger.info(f"Tool: Style improvement: {original_style} → {fixed_style}")
 
         return {
             "status": "success",
@@ -837,7 +886,6 @@ async def compile_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
             "status": "error",
             "message": str(e)
         }
-
 
 async def save_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
     """
@@ -863,6 +911,7 @@ async def save_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
 
         # Convert to JSON
         report_json = json.dumps(fix_report, indent=2)
+        report_part = types.Part.from_text(text=report_json)
 
         # Generate filename
         timestamp = datetime.now().isoformat().replace(':', '-')
@@ -871,8 +920,8 @@ async def save_fix_report(tool_context: ToolContext) -> Dict[str, Any]:
         # Try to save as artifact
         if hasattr(tool_context, 'save_artifact'):
             try:
-                version = await tool_context.save_artifact(filename, report_json)
-                await tool_context.save_artifact("latest_fix_report.json", report_json)
+                version = await tool_context.save_artifact(filename, report_part)
+                await tool_context.save_artifact("latest_fix_report.json", report_part)
 
                 logger.info(f"Tool: Fix report saved as {filename}")
 

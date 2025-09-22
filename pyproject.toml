@@ -1,10 +1,9 @@
 [tool.poetry]
 name = "code-review-assistant"
 version = "1.0.0"
-description = "An intelligent code review assistant powered by Google ADK and Gemini models"
+description = "A code review assistant powered by Google ADK and Gemini models"
 authors = ["Ayo Adedeji <ayoad@google.com>"]
 readme = "README.md"
-python = "^3.10"
 packages = [{include = "code_review_assistant"}]
 
 [tool.poetry.dependencies]
@@ -14,7 +13,7 @@ pycodestyle = "^2.11.0"
 python-dotenv = "^1.0.0"
 pydantic-settings = "^2.0.0"
 structlog = "^24.0.0"
-psycopg2-binary = "^2.9.0"  # Added for Cloud SQL
+psycopg2-binary = "^2.9.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

@@ -13,50 +13,44 @@ from code_review_assistant.config import config
 
 
 async def code_fixer_instruction_provider(context: ReadonlyContext) -> str:
-    """Dynamic instruction provider that injects state variables."""
-    template = """You are a code fixing specialist. You have access to:
+    """Dynamic instruction provider that instructs the agent to output raw code only."""
+    template = """You are an expert code fixing specialist.
 
 Original Code:
-{code_to_review}
-
-Code Analysis Results:
-{code_analysis}
-
-Style Issues (Score: {style_score}/100):
-{style_issues}
-
-Test Results (Pass Rate: {test_execution_summary}):
-Failed tests details available in state.
-
-Your task:
-1. Fix ALL identified issues:
-   - Style violations (PEP 8 compliance)
-   - Logic errors causing test failures
-   - Missing docstrings
-   - Poor naming conventions
-   - Any structural issues
-
-2. Generate your response in this format:
-
-## Issues Being Fixed
-[List each issue you're addressing]
-
-## Targeted Fixes
-[For each major fix, show the before/after]
-
-## Complete Fixed Code
 ```python
-[The entire corrected code]
+{code_to_review}
 ```
 
-IMPORTANT: 
-- Preserve all working functionality
-- Only change what needs fixing
-- Maintain the original code structure
-- Ensure the fixed code is syntactically valid
-- Store the fixed code in state under key 'fixed_code'
-"""
+Analysis Results:
+- Style Score: {style_score}/100
+- Style Issues: {style_issues}
+- Test Results: {test_execution_summary}
+
+Based on the test results, identify and fix ALL issues including:
+- Interface bugs (e.g., if start parameter expects wrong type)
+- Logic errors (e.g., KeyError when accessing graph nodes)
+- Style violations
+- Missing documentation
+
+YOUR TASK:
+Generate the complete fixed Python code that addresses all identified issues.
+
+CRITICAL INSTRUCTIONS:
+- Output ONLY the corrected Python code
+- Do NOT include markdown code blocks (```python)
+- Do NOT include any explanations or commentary
+- The output should be valid, executable Python code and nothing else
+
+Common fixes to apply based on test results:
+- If tests show AttributeError with 'pop', fix: stack = [start] instead of stack = start
+- If tests show KeyError accessing graph, fix: use graph.get(current, [])
+- Add docstrings if missing
+- Fix any style violations identified
+
+Output the complete fixed code now:"""
+
     return await instructions_utils.inject_session_state(template, context)
+
 
 code_fixer_agent = Agent(
     name="CodeFixer",
@@ -64,5 +58,5 @@ code_fixer_agent = Agent(
     description="Generates comprehensive fixes for all identified code issues",
     instruction=code_fixer_instruction_provider,
     code_executor=BuiltInCodeExecutor(),
-    output_key="code_fixes"
+    output_key="code_fixes"  # This will contain raw Python code
 )
