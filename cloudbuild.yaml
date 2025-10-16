@@ -293,7 +293,7 @@ steps:
 
 # Substitution variables
 substitutions:
-  _PROJECT_ID: 'your-gcp-project-id'  # Set this in Cloud Build trigger
+  _PROJECT_ID: 'yougo-k8-hardway-256417'  # Set this in Cloud Build trigger
   _REGION: 'us-central1'
   _SERVICE_NAME: 'code-review-assistant'
   _DEPLOYMENT_TYPE: 'cloud-run'  # Options: 'cloud-run', 'agent-engine'
