@@ -1,0 +1,316 @@
+# Cloud Build configuration for Code Review Assistant
+# Supports both Cloud Run and Agent Engine deployments
+
+steps:
+  # Step 1: Enable required Google Cloud APIs
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔧 Enabling required Google Cloud APIs..."
+        
+        # List of required APIs
+        APIS=(
+          "sqladmin.googleapis.com"
+          "run.googleapis.com"
+          "cloudbuild.googleapis.com"
+          "artifactregistry.googleapis.com"
+          "compute.googleapis.com"
+          "aiplatform.googleapis.com"
+          "storage.googleapis.com"
+          "cloudtrace.googleapis.com"
+        )
+        
+        # Enable APIs
+        for API in "$${APIS[@]}"; do
+          echo "Enabling $${API}..."
+          gcloud services enable "$${API}" --project=${_PROJECT_ID} || echo "API $${API} may already be enabled"
+        done
+        
+        echo "✅ All required APIs enabled"
+
+  # Step 2: Create Artifact Registry repository if it doesn't exist
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🏗️ Setting up Artifact Registry repository..."
+        
+        REPO_NAME="${_SERVICE_NAME}-repo"
+        
+        # Check if repository exists, create if not
+        if ! gcloud artifacts repositories describe "$${REPO_NAME}" \
+          --location=${_REGION} \
+          --project=${_PROJECT_ID} >/dev/null 2>&1; then
+          
+          echo "Creating Artifact Registry repository: $${REPO_NAME}"
+          gcloud artifacts repositories create "$${REPO_NAME}" \
+            --repository-format=docker \
+            --location=${_REGION} \
+            --project=${_PROJECT_ID} \
+            --description="Docker repository for ${_SERVICE_NAME}"
+        else
+          echo "Repository $${REPO_NAME} already exists"
+        fi
+        
+        echo "✅ Artifact Registry repository ready"
+
+  # Step 3: Create storage buckets if they don't exist
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🪣 Setting up storage buckets..."
+        
+        # Artifact bucket
+        ARTIFACT_BUCKET="${_SERVICE_NAME}-artifacts"
+        if ! gsutil ls -b "gs://$${ARTIFACT_BUCKET}" >/dev/null 2>&1; then
+          echo "Creating artifact bucket: gs://$${ARTIFACT_BUCKET}"
+          gsutil mb -p ${_PROJECT_ID} -l ${_REGION} "gs://$${ARTIFACT_BUCKET}"
+        else
+          echo "Artifact bucket gs://$${ARTIFACT_BUCKET} already exists"
+        fi
+        
+        # Staging bucket (for Agent Engine)
+        STAGING_BUCKET="${_SERVICE_NAME}-staging"
+        if ! gsutil ls -b "gs://$${STAGING_BUCKET}" >/dev/null 2>&1; then
+          echo "Creating staging bucket: gs://$${STAGING_BUCKET}"
+          gsutil mb -p ${_PROJECT_ID} -l ${_REGION} "gs://$${STAGING_BUCKET}"
+        else
+          echo "Staging bucket gs://$${STAGING_BUCKET} already exists"
+        fi
+        
+        echo "✅ Storage buckets ready"
+
+  # Step 4: Set up IAM permissions
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔐 Setting up IAM permissions..."
+        
+        # Get project number and service account
+        PROJECT_NUMBER=$$(gcloud projects describe ${_PROJECT_ID} --format="value(projectNumber)")
+        SERVICE_ACCOUNT="$${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+        
+        # Required roles
+        ROLES=(
+          "roles/cloudsql.client"
+          "roles/storage.objectAdmin"
+          "roles/artifactregistry.writer"
+          "roles/aiplatform.user"
+          "roles/cloudtrace.agent"
+        )
+        
+        # Grant roles
+        for ROLE in "$${ROLES[@]}"; do
+          echo "Granting role: $${ROLE}"
+          gcloud projects add-iam-policy-binding ${_PROJECT_ID} \
+            --member="serviceAccount:$${SERVICE_ACCOUNT}" \
+            --role="$${ROLE}" \
+            --quiet || echo "Role $${ROLE} may already be assigned"
+        done
+        
+        echo "✅ IAM permissions configured"
+
+  # Step 5: Create Cloud SQL instance (only for Cloud Run deployment)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "${_DEPLOYMENT_TYPE}" = "cloud-run" ]; then
+          echo "🗄️ Setting up Cloud SQL instance..."
+          
+          INSTANCE_NAME="${_SERVICE_NAME}-db-instance"
+          DB_NAME="sessions"
+          DB_USER="adk-user"
+          
+          # Generate secure password
+          DB_PASSWORD=$$(openssl rand -base64 16)
+          
+          # Check if instance exists
+          if ! gcloud sql instances describe "$${INSTANCE_NAME}" --project=${_PROJECT_ID} >/dev/null 2>&1; then
+            echo "Creating Cloud SQL instance: $${INSTANCE_NAME}"
+            
+            # Create instance
+            gcloud sql instances create "$${INSTANCE_NAME}" \
+              --database-version=POSTGRES_15 \
+              --region=${_REGION} \
+              --root-password="$${DB_PASSWORD}" \
+              --tier=db-g1-small \
+              --project=${_PROJECT_ID}
+            
+            # Create database
+            gcloud sql databases create "$${DB_NAME}" \
+              --instance="$${INSTANCE_NAME}" \
+              --project=${_PROJECT_ID}
+            
+            # Create user
+            gcloud sql users create "$${DB_USER}" \
+              --instance="$${INSTANCE_NAME}" \
+              --password="$${DB_PASSWORD}" \
+              --project=${_PROJECT_ID}
+            
+            echo "✅ Cloud SQL instance created"
+            echo "⚠️ Database credentials (save securely):"
+            echo "DB_USER: $${DB_USER}"
+            echo "DB_PASSWORD: $${DB_PASSWORD}"
+            echo "DB_NAME: $${DB_NAME}"
+            echo "CLOUD_SQL_INSTANCE_NAME: $${INSTANCE_NAME}"
+            
+            # Store credentials as build substitutions for next steps
+            echo "$${DB_PASSWORD}" > /workspace/db_password.txt
+            echo "$${DB_USER}" > /workspace/db_user.txt
+            echo "$${DB_NAME}" > /workspace/db_name.txt
+            echo "$${INSTANCE_NAME}" > /workspace/sql_instance.txt
+          else
+            echo "Cloud SQL instance $${INSTANCE_NAME} already exists"
+            echo "Using existing instance - ensure credentials are in Secret Manager"
+          fi
+        else
+          echo "⏭️ Skipping Cloud SQL setup for Agent Engine deployment"
+        fi
+
+  # Step 6: Build and push Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:latest'
+      - '.'
+    dir: 'adk-code-review-assistant'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:${SHORT_SHA}'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:latest'
+
+  # Step 7: Deploy to Cloud Run (conditional)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "${_DEPLOYMENT_TYPE}" = "cloud-run" ]; then
+          echo "☁️ Deploying to Cloud Run..."
+          
+          # Read database credentials
+          if [ -f /workspace/db_password.txt ]; then
+            DB_PASSWORD=$$(cat /workspace/db_password.txt)
+            DB_USER=$$(cat /workspace/db_user.txt)
+            DB_NAME=$$(cat /workspace/db_name.txt)
+            INSTANCE_NAME=$$(cat /workspace/sql_instance.txt)
+            
+            # Get Cloud SQL connection name
+            CONNECTION_NAME=$$(gcloud sql instances describe "$${INSTANCE_NAME}" \
+              --format="value(connectionName)" \
+              --project=${_PROJECT_ID})
+            
+            # Deploy to Cloud Run
+            gcloud run deploy ${_SERVICE_NAME} \
+              --image=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:${SHORT_SHA} \
+              --region=${_REGION} \
+              --project=${_PROJECT_ID} \
+              --platform=managed \
+              --allow-unauthenticated \
+              --port=8080 \
+              --memory=2Gi \
+              --cpu=2 \
+              --max-instances=10 \
+              --set-env-vars="GOOGLE_CLOUD_PROJECT=${_PROJECT_ID},GOOGLE_CLOUD_LOCATION=${_REGION},GOOGLE_GENAI_USE_VERTEXAI=true,ARTIFACT_BUCKET=${_SERVICE_NAME}-artifacts" \
+              --add-cloudsql-instances="$${CONNECTION_NAME}" \
+              --set-env-vars="DB_USER=$${DB_USER},DB_PASSWORD=$${DB_PASSWORD},DB_NAME=$${DB_NAME},CLOUD_SQL_CONNECTION_NAME=$${CONNECTION_NAME}"
+            
+            echo "✅ Cloud Run deployment complete"
+            
+            # Get service URL
+            SERVICE_URL=$$(gcloud run services describe ${_SERVICE_NAME} \
+              --region=${_REGION} \
+              --project=${_PROJECT_ID} \
+              --format="value(status.url)")
+            
+            echo "🌐 Service URL: $${SERVICE_URL}"
+          else
+            echo "❌ Database credentials not found. Please ensure Cloud SQL instance exists and credentials are available."
+            exit 1
+          fi
+        else
+          echo "⏭️ Skipping Cloud Run deployment"
+        fi
+
+  # Step 8: Deploy to Agent Engine (conditional)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        if [ "${_DEPLOYMENT_TYPE}" = "agent-engine" ]; then
+          echo "🧠 Deploying to Vertex AI Agent Engine..."
+          
+          # Install ADK CLI
+          pip install google-adk
+          
+          # Deploy using ADK CLI
+          if [ -n "${_AGENT_ENGINE_ID}" ]; then
+            echo "Updating existing Agent Engine: ${_AGENT_ENGINE_ID}"
+            adk deploy agent_engine \
+              --project=${_PROJECT_ID} \
+              --region=${_REGION} \
+              --staging_bucket=gs://${_SERVICE_NAME}-staging \
+              --agent_engine_id=${_AGENT_ENGINE_ID} \
+              --trace_to_cloud \
+              code_review_assistant
+          else
+            echo "Creating new Agent Engine deployment"
+            AGENT_ENGINE_ID=$$(adk deploy agent_engine \
+              --project=${_PROJECT_ID} \
+              --region=${_REGION} \
+              --staging_bucket=gs://${_SERVICE_NAME}-staging \
+              --display_name="Code Review Assistant" \
+              --trace_to_cloud \
+              code_review_assistant)
+            
+            echo "✅ Agent Engine created with ID: $${AGENT_ENGINE_ID}"
+            echo "⚠️ Save this Agent Engine ID: $${AGENT_ENGINE_ID}"
+          fi
+          
+          echo "✅ Agent Engine deployment complete"
+        else
+          echo "⏭️ Skipping Agent Engine deployment"
+        fi
+
+# Substitution variables
+substitutions:
+  _PROJECT_ID: 'your-gcp-project-id'  # Set this in Cloud Build trigger
+  _REGION: 'us-central1'
+  _SERVICE_NAME: 'code-review-assistant'
+  _DEPLOYMENT_TYPE: 'cloud-run'  # Options: 'cloud-run', 'agent-engine'
+  _AGENT_ENGINE_ID: ''  # Set this for Agent Engine updates
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'  # Use high CPU for faster builds
+  diskSizeGb: 100
+  env:
+    - 'DOCKER_BUILDKIT=1'  # Enable BuildKit for faster builds
+
+# Timeout
+timeout: '1200s'  # 20 minutes
+
+# Images to store in registry
+images:
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_SERVICE_NAME}-repo/${_SERVICE_NAME}:latest'
